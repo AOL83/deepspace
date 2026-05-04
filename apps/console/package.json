@@ -13,7 +13,6 @@
   },
   "devDependencies": {
     "typescript": "^5.0.0",
-    "vite": "^7.0.0",
-    "@types/three": "latest"
+    "vite": "^7.0.0"
   }
 }
