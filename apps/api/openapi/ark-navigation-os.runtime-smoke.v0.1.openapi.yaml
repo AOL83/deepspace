@@ -1,0 +1,131 @@
+openapi: 3.1.0
+info:
+  title: Ark Navigation OS Runtime Smoke Test API
+  description: >
+    Minimal smoke-test contract for Ark Navigation OS v0.1. This proves the
+    Node runtime is alive, serves the official boot sequence, and returns seeded
+    Sol Sector universe nodes to the browser console.
+  version: 0.1.0
+
+servers:
+  - url: http://localhost:3000
+    description: Local Node.js development server
+
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: Confirm the Ark runtime is alive.
+      responses:
+        "200":
+          description: Runtime heartbeat returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /boot/sequence:
+    get:
+      operationId: getBootSequence
+      summary: Return the official Ark Navigation OS boot sequence.
+      responses:
+        "200":
+          description: Boot sequence returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BootSequence"
+
+  /universe/nodes:
+    get:
+      operationId: listUniverseNodes
+      summary: Return seeded Sol Sector nodes.
+      responses:
+        "200":
+          description: Universe nodes returned.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  nodes:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/UniverseNode"
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+        name:
+          type: string
+          example: Ark Navigation OS Runtime
+        version:
+          type: string
+          example: 0.1.0
+
+    BootSequence:
+      type: object
+      properties:
+        title:
+          type: string
+          example: ARK NAVIGATION OS v0.1
+        phrase:
+          type: string
+          example: Darkness is not empty. It is an address space.
+        lines:
+          type: array
+          items:
+            type: string
+          example:
+            - BOOT SEQUENCE INITIATED
+            - "[CORE] Node runtime online"
+            - "[NAV]  Sol Sector indexed"
+            - "[LOG]  Runtime event stream opened"
+            - ARK NAVIGATION OS READY
+
+    UniverseNode:
+      type: object
+      properties:
+        id:
+          type: string
+          example: sol_earth
+        name:
+          type: string
+          example: Earth
+        type:
+          type: string
+          enum:
+            - star
+            - planet
+            - moon
+            - anomaly
+            - signal
+        sectorId:
+          type: string
+          example: sol_sector
+        coordinates:
+          $ref: "#/components/schemas/Coordinates"
+        discovered:
+          type: boolean
+          example: true
+        metadata:
+          type: object
+          additionalProperties: true
+
+    Coordinates:
+      type: object
+      properties:
+        x:
+          type: number
+          example: 120
+        y:
+          type: number
+          example: 0
+        z:
+          type: number
+          example: 0
