@@ -71,24 +71,7 @@ app.innerHTML = `
         </div>
       </section>
 
-      <section class="panel-section log-section">
-        <p class="eyebrow">RUNTIME EVENT STREAM</p>
-        <div id="event-log" class="event-log"></div>
-      </section>
-    </aside>
-
-    <main class="viewport">
-      <div id="labels" class="labels"></div>
-      <div class="hud">
-        <div class="hud-item"><strong>Title:</strong> <span id="hud-title"></span></div>
-        <div class="hud-item"><strong>Mode:</strong> Runtime Smoke Test</div>
-        <div class="hud-item"><strong>Location:</strong> Sol Sector</div>
-        <div class="hud-item"><strong>Runtime:</strong> <span id="hud-source">Fallback</span></div>
-        <div class="hud-item"><strong>Node Count:</strong> <span id="hud-count">0</span></div>
-        <div class="hud-item"><strong>Selected Node:</strong> <span id="hud-selected">None</span></div>
-      </div>
-
-      <aside class="node-panel">
+      <section class="panel-section node-panel">
         <p class="eyebrow">NODE INFO</p>
         <h2 id="node-name">No node selected</h2>
         <dl>
@@ -98,7 +81,25 @@ app.innerHTML = `
           <div><dt>Coordinates</dt><dd id="node-coordinates">--</dd></div>
         </dl>
         <p id="node-description" class="node-description">Touch a planet, star, signal, or anomaly to inspect it.</p>
-      </aside>
+      </section>
+
+      <section class="panel-section log-section">
+        <p class="eyebrow">RUNTIME EVENT STREAM</p>
+        <div id="event-log" class="event-log"></div>
+      </section>
+    </aside>
+
+    <main class="viewport">
+      <canvas id="scene-canvas"></canvas>
+      <div id="labels" class="labels"></div>
+      <div class="hud">
+        <div class="hud-item"><strong>Title:</strong> <span id="hud-title"></span></div>
+        <div class="hud-item"><strong>Mode:</strong> Runtime Smoke Test</div>
+        <div class="hud-item"><strong>Location:</strong> Sol Sector</div>
+        <div class="hud-item"><strong>Runtime:</strong> <span id="hud-source">Fallback</span></div>
+        <div class="hud-item"><strong>Node Count:</strong> <span id="hud-count">0</span></div>
+        <div class="hud-item"><strong>Selected Node:</strong> <span id="hud-selected">None</span></div>
+      </div>
     </main>
   </div>`;
 
@@ -110,6 +111,7 @@ const hudSource = document.querySelector<HTMLElement>('#hud-source')!;
 const hudCount = document.querySelector<HTMLElement>('#hud-count')!;
 const hudSelected = document.querySelector<HTMLElement>('#hud-selected')!;
 const viewport = document.querySelector<HTMLElement>('.viewport')!;
+const canvas = document.querySelector<HTMLCanvasElement>('#scene-canvas')!;
 const labelsLayer = document.querySelector<HTMLDivElement>('#labels')!;
 const eventLog = document.querySelector<HTMLDivElement>('#event-log')!;
 const scanButton = document.querySelector<HTMLButtonElement>('#scan-button')!;
@@ -135,10 +137,9 @@ const lookTarget = defaultLookTarget.clone();
 camera.position.copy(defaultCameraPosition);
 camera.lookAt(lookTarget);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.setSize(viewport.clientWidth, viewport.clientHeight);
-viewport.appendChild(renderer.domElement);
+renderer.setSize(viewport.clientWidth, viewport.clientHeight, false);
 
 scene.add(new THREE.AmbientLight(0x9fb7ff, 0.45));
 const sunLight = new THREE.PointLight(0xfff2cc, 3.2, 1500);
@@ -176,7 +177,7 @@ const toScenePosition = (node: UniverseNode): THREE.Vector3 => new THREE.Vector3
 );
 
 const createStarfield = (): void => {
-  const starCount = 1400;
+  const starCount = 1200;
   const positions = new Float32Array(starCount * 3);
   for (let i = 0; i < starCount; i += 1) {
     const radius = 480 + Math.random() * 1000;
@@ -232,11 +233,10 @@ const createOrbitRing = (node: UniverseNode): void => {
   if (node.id === 'sol_sun') return;
   const radius = Math.sqrt((node.coordinates.x / SCENE_SCALE) ** 2 + (node.coordinates.z / SCENE_SCALE) ** 2);
   const curve = new THREE.EllipseCurve(0, 0, radius, radius, 0, Math.PI * 2, false, 0);
-  const points = curve.getPoints(160).map((point) => new THREE.Vector3(point.x, 0, point.y));
+  const points = curve.getPoints(128).map((point) => new THREE.Vector3(point.x, 0, point.y));
   const geometry = new THREE.BufferGeometry().setFromPoints(points);
   const material = new THREE.LineBasicMaterial({ color: 0x1f3b64, transparent: true, opacity: 0.35 });
-  const ring = new THREE.LineLoop(geometry, material);
-  scene.add(ring);
+  scene.add(new THREE.LineLoop(geometry, material));
 };
 
 const renderNodes = (nodes: UniverseNode[]): void => {
@@ -358,8 +358,8 @@ const updateLabels = (): void => {
   }
 };
 
-renderer.domElement.addEventListener('click', (event: MouseEvent) => {
-  const rect = renderer.domElement.getBoundingClientRect();
+canvas.addEventListener('click', (event: MouseEvent) => {
+  const rect = canvas.getBoundingClientRect();
   mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
   mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
   raycaster.setFromCamera(mouse, camera);
@@ -382,6 +382,15 @@ resetButton.addEventListener('click', () => {
   addEvent('NAV camera reset to Sol Sector overview.');
 });
 
+const resizeRenderer = (): void => {
+  const width = Math.max(viewport.clientWidth, 1);
+  const height = Math.max(viewport.clientHeight, 1);
+  camera.aspect = width / height;
+  camera.updateProjectionMatrix();
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(width, height, false);
+};
+
 const animate = (): void => {
   camera.position.lerp(desiredCameraPosition, 0.035);
   camera.lookAt(lookTarget);
@@ -396,14 +405,10 @@ const animate = (): void => {
   requestAnimationFrame(animate);
 };
 
-window.addEventListener('resize', () => {
-  camera.aspect = viewport.clientWidth / viewport.clientHeight;
-  camera.updateProjectionMatrix();
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.setSize(viewport.clientWidth, viewport.clientHeight);
-});
+window.addEventListener('resize', resizeRenderer);
 
 const init = async (): Promise<void> => {
+  resizeRenderer();
   createStarfield();
   const { boot, nodes } = await loadData();
   renderBoot(boot);
