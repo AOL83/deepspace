@@ -2,17 +2,8 @@ import './style.css';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
-type UniverseNodeType = 'star' | 'planet' | 'moon' | 'anomaly' | 'signal';
-
-interface UniverseNode {
-  id: string;
-  name: string;
-  type: UniverseNodeType;
-  sectorId: string;
-  coordinates: { x: number; y: number; z: number };
-  discovered: boolean;
-  metadata: { color: string; radius: number; description: string };
-}
+type NodeType = 'star' | 'planet' | 'moon' | 'anomaly' | 'signal' | 'gate' | 'reference';
+type SpaceLayer = 'system' | 'orbit' | 'surface';
 
 interface BootSequence {
   title: string;
@@ -25,30 +16,196 @@ interface RuntimeEvent {
   message: string;
 }
 
+interface QDSMNode {
+  id: string;
+  name: string;
+  type: NodeType;
+  layer: SpaceLayer;
+  parentId: string | null;
+  containerId: string;
+  enterContainerId?: string;
+  localPosition: { x: number; y: number; z: number };
+  displayRadius: number;
+  color: string;
+  discovered: boolean;
+  description: string;
+}
+
+interface QDSMContainer {
+  id: string;
+  name: string;
+  layer: SpaceLayer;
+  originNodeId: string;
+  parentContainerId: string | null;
+  parentNodeId: string | null;
+  visibleNodeIds: string[];
+  cameraPosition: THREE.Vector3;
+  cameraTarget: THREE.Vector3;
+  scaleNote: string;
+}
+
 const fallbackBoot: BootSequence = {
   title: 'ARK NAVIGATION OS v0.1',
   phrase: 'Darkness is not empty. It is an address space.',
   lines: [
     'BOOT SEQUENCE INITIATED',
     '[CORE] Node runtime online',
-    '[NAV]  Sol Sector indexed',
+    '[NAV]  QDSM container mapper online',
     '[LOG]  Runtime event stream opened',
     'ARK NAVIGATION OS READY'
   ]
 };
 
-const fallbackNodes: UniverseNode[] = [
-  { id: 'sol_sun', name: 'Sun', type: 'star', sectorId: 'sol_sector', coordinates: { x: 0, y: 0, z: 0 }, discovered: true, metadata: { color: '#ffd27a', radius: 4, description: 'Central star of the Sol system.' } },
-  { id: 'sol_earth', name: 'Earth', type: 'planet', sectorId: 'sol_sector', coordinates: { x: 120, y: 0, z: 0 }, discovered: true, metadata: { color: '#3b82f6', radius: 1, description: 'Home world.' } },
-  { id: 'sol_moon', name: 'Moon', type: 'moon', sectorId: 'sol_sector', coordinates: { x: 126, y: 1, z: 0 }, discovered: true, metadata: { color: '#d1d5db', radius: 0.3, description: "Earth's natural satellite." } },
-  { id: 'sol_mars', name: 'Mars', type: 'planet', sectorId: 'sol_sector', coordinates: { x: 220, y: 0, z: 45 }, discovered: true, metadata: { color: '#ff5533', radius: 0.8, description: 'Red planet in the Sol system.' } },
-  { id: 'outer_belt_signal_001', name: 'Outer Belt Signal', type: 'signal', sectorId: 'sol_sector', coordinates: { x: 390, y: -18, z: 130 }, discovered: false, metadata: { color: '#22d3ee', radius: 0.4, description: 'Repeating signal from the outer belt.' } },
-  { id: 'anomaly_773', name: 'Outer Belt Anomaly', type: 'anomaly', sectorId: 'sol_sector', coordinates: { x: 420, y: -30, z: 160 }, discovered: false, metadata: { color: '#a855f7', radius: 0.6, description: 'Unknown energy field detected beyond the inner planets.' } }
-];
-
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000';
-const SCENE_SCALE = 8;
 const CLICK_DRAG_THRESHOLD = 6;
+
+const nodeLibrary: Record<string, QDSMNode> = {
+  sol_sun: {
+    id: 'sol_sun',
+    name: 'Sun',
+    type: 'star',
+    layer: 'system',
+    parentId: null,
+    containerId: 'sol_system',
+    localPosition: { x: 0, y: 0, z: 0 },
+    displayRadius: 18,
+    color: '#ffd27a',
+    discovered: true,
+    description: 'Central anchor of the Sol System container.'
+  },
+  sol_earth: {
+    id: 'sol_earth',
+    name: 'Earth',
+    type: 'planet',
+    layer: 'system',
+    parentId: 'sol_sun',
+    containerId: 'sol_system',
+    enterContainerId: 'earth_orbit',
+    localPosition: { x: 92, y: 0, z: 0 },
+    displayRadius: 6,
+    color: '#3b82f6',
+    discovered: true,
+    description: 'Home world. Enter this node to open the Earth Orbit container.'
+  },
+  sol_mars: {
+    id: 'sol_mars',
+    name: 'Mars',
+    type: 'planet',
+    layer: 'system',
+    parentId: 'sol_sun',
+    containerId: 'sol_system',
+    localPosition: { x: 155, y: 0, z: 46 },
+    displayRadius: 5,
+    color: '#ff5533',
+    discovered: true,
+    description: 'Red planet in the Sol System container.'
+  },
+  outer_belt_signal_001: {
+    id: 'outer_belt_signal_001',
+    name: 'Outer Belt Signal',
+    type: 'signal',
+    layer: 'system',
+    parentId: 'sol_sun',
+    containerId: 'sol_system',
+    localPosition: { x: 245, y: -5, z: 105 },
+    displayRadius: 3,
+    color: '#22d3ee',
+    discovered: false,
+    description: 'Repeating signal from the outer belt.'
+  },
+  anomaly_773: {
+    id: 'anomaly_773',
+    name: 'Outer Belt Anomaly',
+    type: 'anomaly',
+    layer: 'system',
+    parentId: 'sol_sun',
+    containerId: 'sol_system',
+    localPosition: { x: 278, y: -8, z: 132 },
+    displayRadius: 4,
+    color: '#a855f7',
+    discovered: false,
+    description: 'Unknown energy field detected beyond the inner planets.'
+  },
+  earth_origin: {
+    id: 'earth_origin',
+    name: 'Earth',
+    type: 'planet',
+    layer: 'orbit',
+    parentId: 'sol_sun',
+    containerId: 'earth_orbit',
+    localPosition: { x: 0, y: 0, z: 0 },
+    displayRadius: 16,
+    color: '#3b82f6',
+    discovered: true,
+    description: 'Earth Orbit container origin. The Moon and atmosphere are mapped relative to this anchor.'
+  },
+  sol_moon: {
+    id: 'sol_moon',
+    name: 'Moon',
+    type: 'moon',
+    layer: 'orbit',
+    parentId: 'earth_origin',
+    containerId: 'earth_orbit',
+    localPosition: { x: 42, y: 1, z: 0 },
+    displayRadius: 4,
+    color: '#d1d5db',
+    discovered: true,
+    description: "Earth's natural satellite. It is now mapped inside Earth Orbit rather than flattened into Sol System scale."
+  },
+  atmosphere_gate_earth: {
+    id: 'atmosphere_gate_earth',
+    name: 'Atmosphere Gate',
+    type: 'gate',
+    layer: 'orbit',
+    parentId: 'earth_origin',
+    containerId: 'earth_orbit',
+    localPosition: { x: 0, y: 0, z: -28 },
+    displayRadius: 2.5,
+    color: '#67e8f9',
+    discovered: true,
+    description: 'Transition marker for future Earth atmosphere entry and surface mapping.'
+  },
+  sun_parent_reference: {
+    id: 'sun_parent_reference',
+    name: 'Sun Direction',
+    type: 'reference',
+    layer: 'orbit',
+    parentId: 'earth_origin',
+    containerId: 'earth_orbit',
+    localPosition: { x: -130, y: 0, z: 0 },
+    displayRadius: 3,
+    color: '#ffd27a',
+    discovered: true,
+    description: 'Parent container reference. This points back toward the Sun / Sol System frame.'
+  }
+};
+
+const containers: Record<string, QDSMContainer> = {
+  sol_system: {
+    id: 'sol_system',
+    name: 'Sol System',
+    layer: 'system',
+    originNodeId: 'sol_sun',
+    parentContainerId: null,
+    parentNodeId: null,
+    visibleNodeIds: ['sol_sun', 'sol_earth', 'sol_mars', 'outer_belt_signal_001', 'anomaly_773'],
+    cameraPosition: new THREE.Vector3(40, 120, 330),
+    cameraTarget: new THREE.Vector3(86, 0, 32),
+    scaleNote: 'Sun-anchored system container. Moons are collapsed into planet containers.'
+  },
+  earth_orbit: {
+    id: 'earth_orbit',
+    name: 'Earth Orbit',
+    layer: 'orbit',
+    originNodeId: 'earth_origin',
+    parentContainerId: 'sol_system',
+    parentNodeId: 'sol_earth',
+    visibleNodeIds: ['earth_origin', 'sol_moon', 'atmosphere_gate_earth', 'sun_parent_reference'],
+    cameraPosition: new THREE.Vector3(24, 58, 118),
+    cameraTarget: new THREE.Vector3(10, 0, 0),
+    scaleNote: 'Earth-anchored orbit container. Moon distance is local to Earth.'
+  }
+};
 
 const app = document.querySelector<HTMLDivElement>('#app');
 if (!app) throw new Error('App container not found');
@@ -70,6 +227,8 @@ app.innerHTML = `
           <button id="route-button" type="button">PLOT ROUTE</button>
           <button id="focus-button" type="button">FOCUS NODE</button>
           <button id="reset-button" type="button">RESET VIEW</button>
+          <button id="enter-button" type="button">ENTER NODE</button>
+          <button id="back-button" type="button">BACK / PARENT</button>
         </div>
       </section>
 
@@ -79,10 +238,15 @@ app.innerHTML = `
         <dl>
           <div><dt>Type</dt><dd id="node-type">--</dd></div>
           <div><dt>Status</dt><dd id="node-status">--</dd></div>
-          <div><dt>Sector</dt><dd id="node-sector">--</dd></div>
-          <div><dt>Coordinates</dt><dd id="node-coordinates">--</dd></div>
+          <div><dt>Layer</dt><dd id="node-sector">--</dd></div>
+          <div><dt>Local Position</dt><dd id="node-coordinates">--</dd></div>
         </dl>
-        <p id="node-description" class="node-description">Touch a planet, star, signal, or anomaly to inspect it.</p>
+        <p id="node-description" class="node-description">Touch a node to inspect it. Use Enter Node to move into a child container.</p>
+      </section>
+
+      <section class="panel-section nav-library-section">
+        <p class="eyebrow">NAV LIBRARY</p>
+        <div id="nav-library" class="button-grid"></div>
       </section>
 
       <section class="panel-section log-section">
@@ -96,12 +260,13 @@ app.innerHTML = `
       <div id="labels" class="labels"></div>
       <div class="hud">
         <div class="hud-item"><strong>Title:</strong> <span id="hud-title"></span></div>
-        <div class="hud-item"><strong>Mode:</strong> Runtime Smoke Test</div>
-        <div class="hud-item"><strong>Location:</strong> Sol Sector</div>
+        <div class="hud-item"><strong>Mode:</strong> QDSM Navigation</div>
+        <div class="hud-item"><strong>Container:</strong> <span id="hud-container">Sol System</span></div>
+        <div class="hud-item"><strong>Path:</strong> <span id="hud-path">Sol System</span></div>
         <div class="hud-item"><strong>Runtime:</strong> <span id="hud-source">Fallback</span></div>
-        <div class="hud-item"><strong>Node Count:</strong> <span id="hud-count">0</span></div>
+        <div class="hud-item"><strong>Visible Nodes:</strong> <span id="hud-count">0</span></div>
         <div class="hud-item"><strong>Selected Node:</strong> <span id="hud-selected">None</span></div>
-        <div class="hud-item control-hint"><strong>Map Controls:</strong> drag rotate / wheel zoom / right-drag pan / tap node</div>
+        <div class="hud-item control-hint"><strong>Map Controls:</strong> drag rotate / wheel zoom / right-drag pan / tap node / Enter Node</div>
       </div>
     </main>
   </div>`;
@@ -111,16 +276,21 @@ const bootPhrase = document.querySelector<HTMLElement>('#boot-phrase')!;
 const bootLines = document.querySelector<HTMLOListElement>('#boot-lines')!;
 const hudTitle = document.querySelector<HTMLElement>('#hud-title')!;
 const hudSource = document.querySelector<HTMLElement>('#hud-source')!;
+const hudContainer = document.querySelector<HTMLElement>('#hud-container')!;
+const hudPath = document.querySelector<HTMLElement>('#hud-path')!;
 const hudCount = document.querySelector<HTMLElement>('#hud-count')!;
 const hudSelected = document.querySelector<HTMLElement>('#hud-selected')!;
 const viewport = document.querySelector<HTMLElement>('.viewport')!;
 const canvas = document.querySelector<HTMLCanvasElement>('#scene-canvas')!;
 const labelsLayer = document.querySelector<HTMLDivElement>('#labels')!;
 const eventLog = document.querySelector<HTMLDivElement>('#event-log')!;
+const navLibrary = document.querySelector<HTMLDivElement>('#nav-library')!;
 const scanButton = document.querySelector<HTMLButtonElement>('#scan-button')!;
 const routeButton = document.querySelector<HTMLButtonElement>('#route-button')!;
 const focusButton = document.querySelector<HTMLButtonElement>('#focus-button')!;
 const resetButton = document.querySelector<HTMLButtonElement>('#reset-button')!;
+const enterButton = document.querySelector<HTMLButtonElement>('#enter-button')!;
+const backButton = document.querySelector<HTMLButtonElement>('#back-button')!;
 const nodeName = document.querySelector<HTMLElement>('#node-name')!;
 const nodeType = document.querySelector<HTMLElement>('#node-type')!;
 const nodeStatus = document.querySelector<HTMLElement>('#node-status')!;
@@ -133,14 +303,6 @@ scene.background = new THREE.Color('#030712');
 scene.fog = new THREE.FogExp2('#030712', 0.0035);
 
 const camera = new THREE.PerspectiveCamera(70, viewport.clientWidth / viewport.clientHeight, 0.1, 5000);
-const defaultCameraPosition = new THREE.Vector3(0, 60, 280);
-const defaultLookTarget = new THREE.Vector3(22, 0, 10);
-const desiredCameraPosition = defaultCameraPosition.clone();
-const lookTarget = defaultLookTarget.clone();
-let autopilotActive = false;
-camera.position.copy(defaultCameraPosition);
-camera.lookAt(lookTarget);
-
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(viewport.clientWidth, viewport.clientHeight, false);
@@ -152,30 +314,33 @@ controls.enablePan = true;
 controls.panSpeed = 0.65;
 controls.rotateSpeed = 0.62;
 controls.zoomSpeed = 0.9;
-controls.minDistance = 18;
-controls.maxDistance = 620;
-controls.target.copy(defaultLookTarget);
-controls.update();
+controls.minDistance = 12;
+controls.maxDistance = 900;
 
 scene.add(new THREE.AmbientLight(0x9fb7ff, 0.45));
 const sunLight = new THREE.PointLight(0xfff2cc, 3.2, 1500);
-sunLight.position.set(0, 0, 0);
 scene.add(sunLight);
+
+const contentGroup = new THREE.Group();
+const routeGroup = new THREE.Group();
+const pulseGroup = new THREE.Group();
+scene.add(contentGroup, routeGroup, pulseGroup);
 
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
-const meshToNode = new Map<THREE.Object3D, UniverseNode>();
-const meshToLabel = new Map<THREE.Object3D, HTMLDivElement>();
+const meshToNode = new Map<THREE.Object3D, QDSMNode>();
+const meshToLabel = new Map<THREE.Object3D, { node: QDSMNode; label: HTMLDivElement }>();
 const runtimeEvents: RuntimeEvent[] = [];
-const routeGroup = new THREE.Group();
-const pulseGroup = new THREE.Group();
-scene.add(routeGroup, pulseGroup);
 
-let selectedNode: UniverseNode | null = null;
-let currentNode: UniverseNode | null = null;
+let selectedNode: QDSMNode | null = null;
+let currentContainerId = 'sol_system';
+let currentOriginNode: QDSMNode = nodeLibrary.sol_sun;
 let activeRoute: THREE.Line | null = null;
 let sourceMode: 'API' | 'Fallback' = 'Fallback';
 let pointerStart: { x: number; y: number } | null = null;
+let autopilotActive = false;
+let desiredCameraPosition = containers.sol_system.cameraPosition.clone();
+let lookTarget = containers.sol_system.cameraTarget.clone();
 
 const formatTime = (): string => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
@@ -187,11 +352,23 @@ const addEvent = (message: string): void => {
     .join('');
 };
 
-const toScenePosition = (node: UniverseNode): THREE.Vector3 => new THREE.Vector3(
-  node.coordinates.x / SCENE_SCALE,
-  node.coordinates.y / SCENE_SCALE,
-  node.coordinates.z / SCENE_SCALE
+const toScenePosition = (node: QDSMNode): THREE.Vector3 => new THREE.Vector3(
+  node.localPosition.x,
+  node.localPosition.y,
+  node.localPosition.z
 );
+
+const getCurrentContainer = (): QDSMContainer => containers[currentContainerId];
+
+const getContainerPath = (containerId: string): string => {
+  const chain: string[] = [];
+  let current: QDSMContainer | null = containers[containerId];
+  while (current) {
+    chain.unshift(current.name);
+    current = current.parentContainerId ? containers[current.parentContainerId] : null;
+  }
+  return chain.join(' > ');
+};
 
 const createStarfield = (): void => {
   const starCount = 1200;
@@ -210,22 +387,15 @@ const createStarfield = (): void => {
   scene.add(new THREE.Points(geometry, material));
 };
 
-const loadData = async (): Promise<{ boot: BootSequence; nodes: UniverseNode[] }> => {
+const loadBoot = async (): Promise<BootSequence> => {
   try {
-    const [bootRes, nodesRes] = await Promise.all([
-      fetch(`${API_BASE_URL}/boot/sequence`),
-      fetch(`${API_BASE_URL}/universe/nodes`)
-    ]);
-
-    if (!bootRes.ok || !nodesRes.ok) throw new Error('API response invalid');
-
-    const boot = (await bootRes.json()) as BootSequence;
-    const nodePayload = (await nodesRes.json()) as { nodes: UniverseNode[] };
+    const bootRes = await fetch(`${API_BASE_URL}/boot/sequence`);
+    if (!bootRes.ok) throw new Error('API response invalid');
     sourceMode = 'API';
-    return { boot, nodes: nodePayload.nodes };
+    return (await bootRes.json()) as BootSequence;
   } catch {
     sourceMode = 'Fallback';
-    return { boot: fallbackBoot, nodes: fallbackNodes };
+    return fallbackBoot;
   }
 };
 
@@ -237,73 +407,166 @@ const renderBoot = (boot: BootSequence): void => {
   hudSource.textContent = sourceMode;
 };
 
-const createNodeLabel = (node: UniverseNode): HTMLDivElement => {
+const resetNodePanel = (): void => {
+  nodeName.textContent = 'No node selected';
+  nodeType.textContent = '--';
+  nodeStatus.textContent = '--';
+  nodeSector.textContent = '--';
+  nodeCoordinates.textContent = '--';
+  nodeDescription.textContent = 'Touch a node to inspect it. Use Enter Node to move into a child container.';
+  hudSelected.textContent = 'None';
+};
+
+const createNodeLabel = (node: QDSMNode): HTMLDivElement => {
   const label = document.createElement('div');
   label.className = `node-label node-label-${node.type}`;
   label.textContent = node.name;
-  label.title = node.metadata.description;
+  label.title = node.description;
   labelsLayer.appendChild(label);
   return label;
 };
 
-const createOrbitRing = (node: UniverseNode): void => {
-  if (node.id === 'sol_sun') return;
-  const radius = Math.sqrt((node.coordinates.x / SCENE_SCALE) ** 2 + (node.coordinates.z / SCENE_SCALE) ** 2);
+const createOrbitRing = (node: QDSMNode): void => {
+  const current = getCurrentContainer();
+  if (node.id === current.originNodeId || node.type === 'reference') return;
+  const position = toScenePosition(node);
+  const radius = Math.sqrt(position.x ** 2 + position.z ** 2);
+  if (radius < 1) return;
   const curve = new THREE.EllipseCurve(0, 0, radius, radius, 0, Math.PI * 2, false, 0);
-  const points = curve.getPoints(128).map((point) => new THREE.Vector3(point.x, 0, point.y));
+  const points = curve.getPoints(160).map((point) => new THREE.Vector3(point.x, 0, point.y));
   const geometry = new THREE.BufferGeometry().setFromPoints(points);
   const material = new THREE.LineBasicMaterial({ color: 0x1f3b64, transparent: true, opacity: 0.35 });
-  scene.add(new THREE.LineLoop(geometry, material));
+  contentGroup.add(new THREE.LineLoop(geometry, material));
 };
 
-const renderNodes = (nodes: UniverseNode[]): void => {
-  hudCount.textContent = String(nodes.length);
-  currentNode = nodes.find((node) => node.id === 'sol_sun') ?? nodes[0] ?? null;
+const disposeObject = (object: THREE.Object3D): void => {
+  object.traverse((child) => {
+    const mesh = child as THREE.Mesh;
+    if (mesh.geometry) mesh.geometry.dispose();
+    const material = mesh.material;
+    if (Array.isArray(material)) material.forEach((item) => item.dispose());
+    else if (material) material.dispose();
+  });
+};
 
-  for (const node of nodes) {
+const clearSceneContent = (): void => {
+  for (const object of [...contentGroup.children]) {
+    contentGroup.remove(object);
+    disposeObject(object);
+  }
+  for (const object of [...routeGroup.children]) {
+    routeGroup.remove(object);
+    disposeObject(object);
+  }
+  for (const object of [...pulseGroup.children]) {
+    pulseGroup.remove(object);
+    disposeObject(object);
+  }
+  labelsLayer.innerHTML = '';
+  meshToNode.clear();
+  meshToLabel.clear();
+  activeRoute = null;
+};
+
+const renderNavLibrary = (): void => {
+  const current = getCurrentContainer();
+  navLibrary.innerHTML = '';
+  for (const nodeId of current.visibleNodeIds) {
+    const node = nodeLibrary[nodeId];
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = node.enterContainerId ? `${node.name} >` : node.name;
+    button.addEventListener('click', () => selectNode(node));
+    navLibrary.appendChild(button);
+  }
+};
+
+const applyContainerCamera = (container: QDSMContainer): void => {
+  desiredCameraPosition = container.cameraPosition.clone();
+  lookTarget = container.cameraTarget.clone();
+  camera.position.copy(desiredCameraPosition);
+  controls.target.copy(lookTarget);
+  controls.update();
+};
+
+const renderContainer = (containerId: string): void => {
+  currentContainerId = containerId;
+  const container = getCurrentContainer();
+  currentOriginNode = nodeLibrary[container.originNodeId];
+  selectedNode = null;
+  resetNodePanel();
+  clearSceneContent();
+
+  for (const nodeId of container.visibleNodeIds) {
+    const node = nodeLibrary[nodeId];
     createOrbitRing(node);
-    const radius = Math.max(node.metadata.radius * 3, 1.4);
-    const geometry = new THREE.SphereGeometry(radius, 32, 32);
+    const geometry = new THREE.SphereGeometry(node.displayRadius, 32, 32);
     const material = new THREE.MeshStandardMaterial({
-      color: node.metadata.color,
-      emissive: node.type === 'star' || node.type === 'signal' || node.type === 'anomaly' ? node.metadata.color : '#000000',
-      emissiveIntensity: node.type === 'star' ? 1.1 : node.type === 'signal' || node.type === 'anomaly' ? 0.5 : 0.08,
+      color: node.color,
+      emissive: node.type === 'star' || node.type === 'signal' || node.type === 'anomaly' || node.type === 'gate' ? node.color : '#000000',
+      emissiveIntensity: node.type === 'star' ? 1.1 : node.type === 'reference' ? 0.7 : node.type === 'gate' ? 0.55 : 0.18,
       roughness: 0.55,
       metalness: 0.08,
-      wireframe: node.type === 'anomaly' || node.type === 'signal'
+      wireframe: node.type === 'anomaly' || node.type === 'signal' || node.type === 'gate' || node.type === 'reference'
     });
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.copy(toScenePosition(node));
     mesh.userData.rotationSpeed = 0.002 + Math.random() * 0.01;
     meshToNode.set(mesh, node);
-    meshToLabel.set(mesh, createNodeLabel(node));
-    scene.add(mesh);
+    meshToLabel.set(mesh, { node, label: createNodeLabel(node) });
+    contentGroup.add(mesh);
   }
+
+  hudContainer.textContent = container.name;
+  hudPath.textContent = getContainerPath(container.id);
+  hudCount.textContent = String(container.visibleNodeIds.length);
+  renderNavLibrary();
+  applyContainerCamera(container);
+  addEvent(`QDSM container loaded: ${container.name}. ${container.scaleNote}`);
 };
 
-const updateNodePanel = (node: UniverseNode): void => {
+const updateNodePanel = (node: QDSMNode): void => {
   nodeName.textContent = node.name;
   nodeType.textContent = node.type;
   nodeStatus.textContent = node.discovered ? 'discovered' : 'undiscovered';
-  nodeSector.textContent = node.sectorId;
-  nodeCoordinates.textContent = `x ${node.coordinates.x} / y ${node.coordinates.y} / z ${node.coordinates.z}`;
-  nodeDescription.textContent = node.metadata.description;
+  nodeSector.textContent = node.layer;
+  nodeCoordinates.textContent = `x ${node.localPosition.x} / y ${node.localPosition.y} / z ${node.localPosition.z}`;
+  nodeDescription.textContent = node.description;
 };
 
-const focusCameraOnNode = (node: UniverseNode): void => {
+const focusCameraOnNode = (node: QDSMNode): void => {
   const nodePosition = toScenePosition(node);
-  const distance = Math.max(node.metadata.radius * 14, 32);
-  desiredCameraPosition.copy(nodePosition.clone().add(new THREE.Vector3(distance, distance * 0.55, distance * 1.8)));
-  lookTarget.copy(nodePosition);
+  const distance = Math.max(node.displayRadius * 8, 38);
+  desiredCameraPosition = nodePosition.clone().add(new THREE.Vector3(distance, distance * 0.5, distance * 1.45));
+  lookTarget = nodePosition.clone();
   autopilotActive = true;
 };
 
-const selectNode = (node: UniverseNode): void => {
+function selectNode(node: QDSMNode): void {
   selectedNode = node;
   hudSelected.textContent = `${node.name} (${node.type})`;
   updateNodePanel(node);
   focusCameraOnNode(node);
   addEvent(`NAV selected ${node.name} / ${node.type}`);
+}
+
+const enterSelectedNode = (): void => {
+  if (!selectedNode?.enterContainerId) {
+    addEvent('QDSM enter rejected: selected node has no child container.');
+    return;
+  }
+  renderContainer(selectedNode.enterContainerId);
+};
+
+const enterParentContainer = (): void => {
+  const current = getCurrentContainer();
+  if (!current.parentContainerId) {
+    addEvent('QDSM back rejected: already at root container.');
+    return;
+  }
+  const parentNodeId = current.parentNodeId;
+  renderContainer(current.parentContainerId);
+  if (parentNodeId) selectNode(nodeLibrary[parentNodeId]);
 };
 
 const clearRoute = (): void => {
@@ -317,13 +580,13 @@ const clearRoute = (): void => {
 };
 
 const plotRoute = (): void => {
-  if (!selectedNode || !currentNode || selectedNode.id === currentNode.id) {
+  if (!selectedNode || selectedNode.id === currentOriginNode.id) {
     addEvent('NAV route plot rejected: select a destination node first.');
     return;
   }
 
   clearRoute();
-  const origin = toScenePosition(currentNode);
+  const origin = toScenePosition(currentOriginNode);
   const destination = toScenePosition(selectedNode);
   const mid = origin.clone().lerp(destination, 0.5).add(new THREE.Vector3(0, 20, 0));
   const curve = new THREE.CatmullRomCurve3([origin, mid, destination]);
@@ -333,11 +596,11 @@ const plotRoute = (): void => {
   routeGroup.add(activeRoute);
 
   const distance = origin.distanceTo(destination).toFixed(1);
-  addEvent(`NAV route plotted: ${currentNode.name} → ${selectedNode.name} / ${distance} AU-sim.`);
+  addEvent(`NAV route plotted: ${currentOriginNode.name} → ${selectedNode.name} / ${distance} local units.`);
 };
 
 const createScanPulse = (): void => {
-  const origin = currentNode ? toScenePosition(currentNode) : new THREE.Vector3();
+  const origin = toScenePosition(currentOriginNode);
   const geometry = new THREE.RingGeometry(1, 1.25, 96);
   const material = new THREE.MeshBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.75, side: THREE.DoubleSide });
   const pulse = new THREE.Mesh(geometry, material);
@@ -345,7 +608,7 @@ const createScanPulse = (): void => {
   pulse.rotation.x = Math.PI / 2;
   pulse.userData.life = 0;
   pulseGroup.add(pulse);
-  addEvent('SCAN pulse emitted across Sol Sector.');
+  addEvent(`SCAN pulse emitted inside ${getCurrentContainer().name}.`);
 };
 
 const updateScanPulses = (): void => {
@@ -368,11 +631,13 @@ const updateScanPulses = (): void => {
 const updateLabels = (): void => {
   const width = viewport.clientWidth;
   const height = viewport.clientHeight;
-  for (const [mesh, label] of meshToLabel.entries()) {
-    const position = mesh.position.clone().project(camera);
+  for (const [mesh, entry] of meshToLabel.entries()) {
+    const labelPosition = mesh.position.clone();
+    labelPosition.y += entry.node.displayRadius + 4;
+    const position = labelPosition.project(camera);
     const visible = position.z < 1;
-    label.style.display = visible ? 'block' : 'none';
-    label.style.transform = `translate(-50%, -50%) translate(${(position.x * 0.5 + 0.5) * width}px, ${(-position.y * 0.5 + 0.5) * height}px)`;
+    entry.label.style.display = visible ? 'block' : 'none';
+    entry.label.style.transform = `translate(-50%, -50%) translate(${(position.x * 0.5 + 0.5) * width}px, ${(-position.y * 0.5 + 0.5) * height}px)`;
   }
 };
 
@@ -408,12 +673,15 @@ focusButton.addEventListener('click', () => {
   else addEvent('NAV focus rejected: no selected node.');
 });
 resetButton.addEventListener('click', () => {
-  desiredCameraPosition.copy(defaultCameraPosition);
-  lookTarget.copy(defaultLookTarget);
+  const container = getCurrentContainer();
+  desiredCameraPosition = container.cameraPosition.clone();
+  lookTarget = container.cameraTarget.clone();
   autopilotActive = true;
   clearRoute();
-  addEvent('NAV camera reset to Sol Sector overview.');
+  addEvent(`NAV camera reset to ${container.name}.`);
 });
+enterButton.addEventListener('click', enterSelectedNode);
+backButton.addEventListener('click', enterParentContainer);
 
 const resizeRenderer = (): void => {
   const width = Math.max(viewport.clientWidth, 1);
@@ -450,12 +718,12 @@ window.addEventListener('resize', resizeRenderer);
 const init = async (): Promise<void> => {
   resizeRenderer();
   createStarfield();
-  const { boot, nodes } = await loadData();
+  const boot = await loadBoot();
   renderBoot(boot);
-  renderNodes(nodes);
+  renderContainer('sol_system');
   addEvent(`CORE console online via ${sourceMode} data.`);
-  addEvent(`NAV indexed ${nodes.length} Sol Sector nodes.`);
-  addEvent('NAV manual controls online: drag, zoom, pan, tap node.');
+  addEvent('QDSM online: nested origin containers enabled.');
+  addEvent('NAV manual controls online: drag, zoom, pan, tap node, Enter Node.');
   animate();
 };
 
