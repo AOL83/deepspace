@@ -1,5 +1,6 @@
 import './style.css';
 import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 type UniverseNodeType = 'star' | 'planet' | 'moon' | 'anomaly' | 'signal';
 
@@ -47,6 +48,7 @@ const fallbackNodes: UniverseNode[] = [
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000';
 const SCENE_SCALE = 8;
+const CLICK_DRAG_THRESHOLD = 6;
 
 const app = document.querySelector<HTMLDivElement>('#app');
 if (!app) throw new Error('App container not found');
@@ -99,6 +101,7 @@ app.innerHTML = `
         <div class="hud-item"><strong>Runtime:</strong> <span id="hud-source">Fallback</span></div>
         <div class="hud-item"><strong>Node Count:</strong> <span id="hud-count">0</span></div>
         <div class="hud-item"><strong>Selected Node:</strong> <span id="hud-selected">None</span></div>
+        <div class="hud-item control-hint"><strong>Map Controls:</strong> drag rotate / wheel zoom / right-drag pan / tap node</div>
       </div>
     </main>
   </div>`;
@@ -134,12 +137,25 @@ const defaultCameraPosition = new THREE.Vector3(0, 60, 280);
 const defaultLookTarget = new THREE.Vector3(22, 0, 10);
 const desiredCameraPosition = defaultCameraPosition.clone();
 const lookTarget = defaultLookTarget.clone();
+let autopilotActive = false;
 camera.position.copy(defaultCameraPosition);
 camera.lookAt(lookTarget);
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(viewport.clientWidth, viewport.clientHeight, false);
+
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.enablePan = true;
+controls.panSpeed = 0.65;
+controls.rotateSpeed = 0.62;
+controls.zoomSpeed = 0.9;
+controls.minDistance = 18;
+controls.maxDistance = 620;
+controls.target.copy(defaultLookTarget);
+controls.update();
 
 scene.add(new THREE.AmbientLight(0x9fb7ff, 0.45));
 const sunLight = new THREE.PointLight(0xfff2cc, 3.2, 1500);
@@ -159,6 +175,7 @@ let selectedNode: UniverseNode | null = null;
 let currentNode: UniverseNode | null = null;
 let activeRoute: THREE.Line | null = null;
 let sourceMode: 'API' | 'Fallback' = 'Fallback';
+let pointerStart: { x: number; y: number } | null = null;
 
 const formatTime = (): string => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
@@ -278,6 +295,7 @@ const focusCameraOnNode = (node: UniverseNode): void => {
   const distance = Math.max(node.metadata.radius * 14, 32);
   desiredCameraPosition.copy(nodePosition.clone().add(new THREE.Vector3(distance, distance * 0.55, distance * 1.8)));
   lookTarget.copy(nodePosition);
+  autopilotActive = true;
 };
 
 const selectNode = (node: UniverseNode): void => {
@@ -358,7 +376,16 @@ const updateLabels = (): void => {
   }
 };
 
-canvas.addEventListener('click', (event: MouseEvent) => {
+canvas.addEventListener('pointerdown', (event: PointerEvent) => {
+  pointerStart = { x: event.clientX, y: event.clientY };
+});
+
+canvas.addEventListener('pointerup', (event: PointerEvent) => {
+  if (!pointerStart) return;
+  const dragDistance = Math.hypot(event.clientX - pointerStart.x, event.clientY - pointerStart.y);
+  pointerStart = null;
+  if (dragDistance > CLICK_DRAG_THRESHOLD) return;
+
   const rect = canvas.getBoundingClientRect();
   mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
   mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
@@ -370,6 +397,10 @@ canvas.addEventListener('click', (event: MouseEvent) => {
   }
 });
 
+controls.addEventListener('start', () => {
+  autopilotActive = false;
+});
+
 scanButton.addEventListener('click', createScanPulse);
 routeButton.addEventListener('click', plotRoute);
 focusButton.addEventListener('click', () => {
@@ -379,6 +410,8 @@ focusButton.addEventListener('click', () => {
 resetButton.addEventListener('click', () => {
   desiredCameraPosition.copy(defaultCameraPosition);
   lookTarget.copy(defaultLookTarget);
+  autopilotActive = true;
+  clearRoute();
   addEvent('NAV camera reset to Sol Sector overview.');
 });
 
@@ -392,8 +425,15 @@ const resizeRenderer = (): void => {
 };
 
 const animate = (): void => {
-  camera.position.lerp(desiredCameraPosition, 0.035);
-  camera.lookAt(lookTarget);
+  if (autopilotActive) {
+    camera.position.lerp(desiredCameraPosition, 0.035);
+    controls.target.lerp(lookTarget, 0.05);
+    if (camera.position.distanceTo(desiredCameraPosition) < 0.5 && controls.target.distanceTo(lookTarget) < 0.25) {
+      autopilotActive = false;
+    }
+  }
+
+  controls.update();
 
   for (const obj of meshToNode.keys()) {
     obj.rotation.y += obj.userData.rotationSpeed as number;
@@ -415,6 +455,7 @@ const init = async (): Promise<void> => {
   renderNodes(nodes);
   addEvent(`CORE console online via ${sourceMode} data.`);
   addEvent(`NAV indexed ${nodes.length} Sol Sector nodes.`);
+  addEvent('NAV manual controls online: drag, zoom, pan, tap node.');
   animate();
 };
 
