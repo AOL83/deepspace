@@ -1,0 +1,655 @@
+openapi: 3.1.0
+info:
+  title: Ark Recursive Container API
+  description: |
+    The Ark Recursive Container API exposes the core primitives for managing nested
+    environments within the Ark Navigation OS. Everything in Ark — from ships and
+    rooms to cities, shelves and even mounted cartridges — is modelled as a
+    container. Containers can themselves contain other containers, forming a
+    recursive hierarchy. This API allows callers to create, retrieve and update
+    containers, traverse into and out of nested nodes, manage objects within a
+    container and persist their state.
+  version: 0.1.0
+servers:
+  - url: http://localhost:3000
+    description: Local development server
+  - url: https://ark-container.nav-os.to
+    description: Production server
+paths:
+  /containers:
+    post:
+      operationId: createContainer
+      summary: Create a new container
+      description: |
+        Creates a new container node in the Ark hierarchy. Containers can
+        represent many things—ships, rooms, planets, cities, shops, shelves,
+        cartridges and more. Supplying a `parentId` will nest the new
+        container under an existing parent; omitting it will create a root
+        container.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateContainerRequest'
+      responses:
+        '201':
+          description: Container created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Container'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /containers/{containerId}:
+    get:
+      operationId: getContainer
+      summary: Retrieve a container
+      description: Returns the container with the given identifier including its current state.
+      parameters:
+        - name: containerId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The requested container
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Container'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    patch:
+      operationId: updateContainerState
+      summary: Update a container
+      description: |
+        Updates mutable attributes of a container, such as its name, state,
+        position, permissions or attached modules. Only supplied fields will be
+        modified; unspecified fields remain unchanged.
+      parameters:
+        - name: containerId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateContainerRequest'
+      responses:
+        '200':
+          description: Container updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Container'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /containers/{containerId}/children:
+    get:
+      operationId: listChildContainers
+      summary: List child containers
+      description: Returns a list of containers nested directly within the specified parent.
+      parameters:
+        - name: containerId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Child containers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Container'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /containers/{containerId}/enter:
+    post:
+      operationId: enterContainer
+      summary: Enter a container
+      description: |
+        Enters a container node, updating the caller's session or avatar context
+        to be within that container. This is how a player moves deeper into
+        nested environments.
+      parameters:
+        - name: containerId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnterContainerRequest'
+      responses:
+        '200':
+          description: Entered container successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnterContainerResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /containers/{containerId}/exit:
+    post:
+      operationId: exitContainer
+      summary: Exit a container
+      description: |
+        Exits the specified container and returns the caller to its parent. If the
+        container has no parent, exiting returns to the root level.
+      parameters:
+        - name: containerId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExitContainerRequest'
+      responses:
+        '200':
+          description: Exited container successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExitContainerResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /containers/{containerId}/objects:
+    post:
+      operationId: placeObject
+      summary: Place an object in a container
+      description: |
+        Adds an object to the specified container. The object will be placed at
+        the given position within the container’s local coordinate space. Use
+        this to persistently store items, furniture, terminals and other
+        interactables in a container.
+      parameters:
+        - name: containerId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlaceObjectRequest'
+      responses:
+        '201':
+          description: Object placed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Object'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    get:
+      operationId: listObjectsInContainer
+      summary: List objects in a container
+      description: Returns all objects currently placed within the container.
+      parameters:
+        - name: containerId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Objects in the container
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Object'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /containers/{containerId}/objects/{objectId}:
+    patch:
+      operationId: moveObject
+      summary: Move an object within a container
+      description: Updates the position of a placed object inside the container.
+      parameters:
+        - name: containerId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: objectId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MoveObjectRequest'
+      responses:
+        '200':
+          description: Object moved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Object'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: removeObject
+      summary: Remove an object from a container
+      description: Permanently removes a placed object from the container.
+      parameters:
+        - name: containerId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: objectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Object removed successfully
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /containers/{containerId}/interact:
+    post:
+      operationId: interactWithContainer
+      summary: Interact with a container
+      description: |
+        Performs an interaction on the container. Actions might include opening
+        or closing a door, activating a console, initiating a hack, scanning for
+        hidden nodes, or any other container-specific action defined by its
+        modules.
+      parameters:
+        - name: containerId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InteractionRequest'
+      responses:
+        '200':
+          description: Interaction performed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InteractionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /containers/{containerId}/save:
+    post:
+      operationId: saveContainerState
+      summary: Save container state
+      description: Persists the current state of the container and all of its children to durable storage.
+      parameters:
+        - name: containerId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Container state saved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SaveResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+components:
+  responses:
+    BadRequest:
+      description: The request could not be understood or was missing required parameters.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: The specified resource was not found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    InternalServerError:
+      description: An unexpected error occurred on the server.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error type identifier
+        message:
+          type: string
+          description: Detailed error message
+      required:
+        - error
+        - message
+    Position:
+      type: object
+      properties:
+        x:
+          type: number
+        y:
+          type: number
+        z:
+          type: number
+      required:
+        - x
+        - y
+        - z
+    Object:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Unique identifier for the object
+        name:
+          type: string
+          description: Name of the object
+        type:
+          type: string
+          description: Object type or category
+        position:
+          $ref: '#/components/schemas/Position'
+        state:
+          type: string
+          description: Current state of the object
+        containerId:
+          type: string
+          description: Identifier of the container holding the object
+        owner:
+          type: string
+          description: Owner of the object, such as an avatar ID
+        metadata:
+          type: object
+          additionalProperties: true
+          description: Arbitrary metadata associated with the object
+      required:
+        - id
+        - name
+        - type
+        - containerId
+    Container:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Unique identifier for the container
+        parentId:
+          type: string
+          nullable: true
+          description: Identifier of the parent container, if any
+        name:
+          type: string
+          description: Name of the container
+        type:
+          type: string
+          description: Container type, for example ship, room, planet, city, shop, shelf, cartridge
+        position:
+          $ref: '#/components/schemas/Position'
+        state:
+          type: string
+          description: Current state of the container, for example active, inactive, destroyed
+        permissions:
+          type: object
+          additionalProperties:
+            type: string
+          description: Permissions applied to the container
+        interactions:
+          type: array
+          items:
+            type: string
+          description: List of available interaction actions
+        inventory:
+          type: array
+          items:
+            $ref: '#/components/schemas/Object'
+          description: Objects placed within the container
+        modules:
+          type: array
+          items:
+            type: string
+          description: Modules or adapters attached to the container
+        entryRules:
+          type: string
+          description: Rules that govern entering the container
+        exitRules:
+          type: string
+          description: Rules that govern exiting the container
+        visualRepresentation:
+          type: string
+          description: Identifier or URI for rendering the container
+        runtimeAdapter:
+          type: string
+          description: Identifier of the runtime adapter used by the container
+        children:
+          type: array
+          items:
+            type: string
+          description: IDs of child containers
+      required:
+        - id
+        - name
+        - type
+        - position
+    CreateContainerRequest:
+      type: object
+      properties:
+        parentId:
+          type: string
+          nullable: true
+        name:
+          type: string
+        type:
+          type: string
+        position:
+          $ref: '#/components/schemas/Position'
+        state:
+          type: string
+          nullable: true
+        permissions:
+          type: object
+          additionalProperties:
+            type: string
+        entryRules:
+          type: string
+          nullable: true
+        exitRules:
+          type: string
+          nullable: true
+        modules:
+          type: array
+          items:
+            type: string
+      required:
+        - name
+        - type
+        - position
+    UpdateContainerRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          nullable: true
+        state:
+          type: string
+          nullable: true
+        position:
+          $ref: '#/components/schemas/Position'
+          nullable: true
+        permissions:
+          type: object
+          additionalProperties:
+            type: string
+        entryRules:
+          type: string
+          nullable: true
+        exitRules:
+          type: string
+          nullable: true
+        modules:
+          type: array
+          items:
+            type: string
+      additionalProperties: false
+    EnterContainerRequest:
+      type: object
+      properties:
+        avatarId:
+          type: string
+          description: Identifier of the avatar entering the container
+      required:
+        - avatarId
+    EnterContainerResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        container:
+          $ref: '#/components/schemas/Container'
+      required:
+        - success
+        - container
+    ExitContainerRequest:
+      type: object
+      properties:
+        avatarId:
+          type: string
+          description: Identifier of the avatar exiting the container
+      required:
+        - avatarId
+    ExitContainerResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        container:
+          $ref: '#/components/schemas/Container'
+      required:
+        - success
+        - container
+    PlaceObjectRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+        position:
+          $ref: '#/components/schemas/Position'
+        state:
+          type: string
+          nullable: true
+        owner:
+          type: string
+          nullable: true
+        metadata:
+          type: object
+          additionalProperties: true
+      required:
+        - name
+        - type
+        - position
+    MoveObjectRequest:
+      type: object
+      properties:
+        position:
+          $ref: '#/components/schemas/Position'
+      required:
+        - position
+    InteractionRequest:
+      type: object
+      properties:
+        action:
+          type: string
+          description: Action to perform on the container, for example open, close, activate, hack, scan
+        parameters:
+          type: object
+          additionalProperties: true
+          description: Additional parameters for the action
+      required:
+        - action
+    InteractionResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        result:
+          type: object
+          additionalProperties: true
+      required:
+        - success
+    SaveResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        timestamp:
+          type: string
+          format: date-time
+      required:
+        - success
+        - timestamp
