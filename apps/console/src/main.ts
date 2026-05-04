@@ -110,8 +110,7 @@ const renderNodes = (nodes: UniverseNode[]): void => {
   }
 };
 
-// MouseEvent typing keeps strict TypeScript builds green in GitHub Actions.
-renderer.domElement.addEventListener('click', (event: MouseEvent) => {
+renderer.domElement.addEventListener('click', (event) => {
   const rect = renderer.domElement.getBoundingClientRect();
   mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
   mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
